@@ -28,7 +28,6 @@ enum LType {DEFAULT, STR_LIT, NUM_LIT, BOOL_LIT}; // denotes what type of litera
 */
 class TMInstruction {
     private:
-        int address;                // program memory address
         Instruction instruction = NONE;    // the instruction to be executed
         int addrs[3];               // 3 address part of "3 Address Code"
         std::string comment;        // stores a comment for this line
@@ -40,6 +39,7 @@ class TMInstruction {
         } literal;
 
     public:
+        int address;                // program memory address
         std::string instructionToStr(); // convert an instruction code into a string output
         TMInstruction(int line, Instruction ins, int addr1, int addr2, int addr3, std::string comment);
         TMInstruction(int line, Instruction ins, LType ltype, void* lit_ptr, std::string comment);
@@ -61,11 +61,13 @@ class CodeGenerator {
         int main_loc;               // stores the address in program memory for main
         int main_ret_loc;           // store the pmem address of the main return stmt, used in init
 
-        int loffset;
-        int goffset;
-        int toffset;
+        int reset_pt;
+
+        // imperfect solution, can't handle multiple definitions of single function name
+        std::map<std::string, TMInstruction*> functionMap; // function names mapping to instructions
 
         bool isCallChild = false;   // if set true, then nodes below call are params
+        bool inExpression = false;
         // Setup functions
         void init();                // sets up all static header comments and cookie-cutter code before tree traversal
         // Doubly linked list functions
@@ -73,31 +75,19 @@ class CodeGenerator {
         TMInstruction* prog_tail;        // reference to the tail/last line of 3 address code
         void addLine(TMInstruction*);    // add new line to end of program
         // wrappers for addLine that create a new TMInstruction and add it to the list
-        void addLine(std::string);
-        void addLine(int, Instruction, int, int, int, std::string);
-        void addLine(int, Instruction, LType, void*, std::string);
+        TMInstruction* addLine(std::string);
+        TMInstruction* addLine(Instruction, int, int, int, std::string);
+        TMInstruction* addLine(Instruction, LType, void*, std::string);
         void insertLine(TMInstruction*, TMInstruction*); // insert new line after a specific line
         TMInstruction* removeLine(TMInstruction*); // remove a line from the list while keeping lines before and after
-        // Tree traversal and code gen functions
-        void generateCode(ASTreeNode*);       // traverse the tree and convert into 3 address code, first pass
-        void generateInitCode(ASTreeNode*); // generate code snips for this node type that don't change between programs
-        void generatePostProc(ASTreeNode*);   // generate the code that comes after a node
-        void generateInit();                    // final function called, places vector to main and halt
-        // generate DeclK
-        void generateFunc(ASTreeNode*);
-        void generateVar(ASTreeNode*);
-        void generateParam(ASTreeNode*);
-        // generate StmtK
-        void generateCompound(ASTreeNode*);
-        void generateReturn(ASTreeNode*);
-        void generateCall(ASTreeNode*);
-
-        // Tree Traversal Cleanup
-        void genFunCleanup(ASTreeNode*);
-        void genReturnCleanup(ASTreeNode*);
-        void genCallCleanup(ASTreeNode*);
-
         void appendToFile(); // write all lines of code to the output file in order
+
+        // code generation functions
+        void genCode(ASTreeNode* n, int offset, bool genSibling);
+        void genReturn(ASTreeNode*);
+        void genArgs(ASTreeNode*, int, int);
+
+        void generateInit();
 
     public:
         CodeGenerator(ASTreeNode*);     // Generate code based on the AST passed to the generator

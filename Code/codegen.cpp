@@ -1,4 +1,5 @@
 #include "codegen.h"
+using namespace std;
 
 ////////////////////////////////////////////////////////////////////////////////
 //  TMInstruction                                                             //
@@ -284,7 +285,7 @@ CodeGenerator::CodeGenerator(ASTreeNode* root){
     init();
     // attach pointer to code so we can use emitcode.h
     code = fopen("testfile.tm", "a");
-    generateCode(root);
+    genCode(root, 0, true);
     generateInit();
     appendToFile();
 }
@@ -304,96 +305,92 @@ void CodeGenerator::init(){
     addLine("");
 
     addLine("FUNCTION input");
-    addLine(1, ST, 3, -1, 1, "Store return address");
-    addLine(2, IN, 2,2,2, "Grab int input");
-    addLine(3,LD,3,-1,1,"Load return address");
-    addLine(4,LD,1,0,1,"Adjust");
-    addLine(5,JMP,7,0,3, "Return");
+    pmem = 1;
+    functionMap["input"] = addLine(ST, 3, -1, 1, "Store return address");
+    addLine(IN, 2,2,2, "Grab int input");
+    addLine(LD,3,-1,1,"Load return address");
+    addLine(LD,1,0,1,"Adjust");
+    addLine(JMP,7,0,3, "Return");
     addLine("END FUNCTION input");
     addLine("");
     addLine("** ** ** ** ** ** ** ** ** ** ** **");
     addLine("END FUNCTION inputb");
-    addLine(6, ST, 3,-1,1, "Store return address");
-    addLine(7, INB, 2,2,2, "Grab bool input");
-    addLine(8, LD, 3,-1,1, "Load return address");
-    addLine(9, LD, 1,0,1, "Adjust fp");
-    addLine(10, JMP, 7,0,3, "Return");
+    functionMap["inputb"] = addLine(ST, 3,-1,1, "Store return address");
+    addLine(INB, 2,2,2, "Grab bool input");
+    addLine(LD, 3,-1,1, "Load return address");
+    addLine(LD, 1,0,1, "Adjust fp");
+    addLine(JMP, 7,0,3, "Return");
     addLine("END FUNCTION inputb");
     addLine("");
     addLine("** ** ** ** ** ** ** ** ** ** ** **");
     addLine("FUNCTION inputc");
-    addLine(11, ST, 3,-1,1, "Store return address");    // INPU
-    addLine(12, INC_tm, 2,2,2, "Grab char input");
-    addLine(13, LD, 3,-1,1, "Load return address");
-    addLine(14, LD, 1,0,1, "Adjust");
-    addLine(15, JMP, 7,0,3, "Return");
+    functionMap["inputc"] = addLine(ST, 3,-1,1, "Store return address");    // INPU
+    addLine(INC_tm, 2,2,2, "Grab char input");
+    addLine(LD, 3,-1,1, "Load return address");
+    addLine(LD, 1,0,1, "Adjust");
+    addLine(JMP, 7,0,3, "Return");
     addLine("END FUNCTION inputc");
     addLine("");
     addLine("** ** ** ** ** ** ** ** ** ** ** **");
     addLine("FUNCTION output");
-    addLine(16, ST, 3,-1,1, "Store return address");     // OUTPUT
-    addLine(17, LD, 3,-2,1, "Load parameter");
-    addLine(18, OUT, 3,3,3, "Output integer");
-    addLine(19, LD, 3,-1,1, "Load return address");
-    addLine(20, LD, 1,0,1, "Adjust");
-    addLine(21, JMP, 7,0,3, "Return");
+    functionMap["output"] = addLine(ST, 3,-1,1, "Store return address");     // OUTPUT
+    addLine(LD, 3,-2,1, "Load parameter");
+    addLine(OUT, 3,3,3, "Output integer");
+    addLine(LD, 3,-1,1, "Load return address");
+    addLine(LD, 1,0,1, "Adjust");
+    addLine(JMP, 7,0,3, "Return");
     addLine("END FUNCTION output");
     addLine("");
     addLine("** ** ** ** ** ** ** ** ** ** ** **");
     addLine("FUNCTION outputb");
-    addLine(22, ST, 3,-1,1, "Store return address");     // OUTPUTB
-    addLine(23, LD, 3,-2,1, "Load parameter");
-    addLine(24, OUTB, 3,3,3, "Output bool");
-    addLine(25, LD, 3,-1,1, "Load return address");
-    addLine(26, LD, 1,0,1, "Adjust");
-    addLine(27, JMP, 7,0,3, "Return");
+    functionMap["outputb"] = addLine(ST, 3,-1,1, "Store return address");     // OUTPUTB
+    addLine(LD, 3,-2,1, "Load parameter");
+    addLine(OUTB, 3,3,3, "Output bool");
+    addLine(LD, 3,-1,1, "Load return address");
+    addLine(LD, 1,0,1, "Adjust");
+    addLine(JMP, 7,0,3, "Return");
     addLine("END FUNCTION outputb");
     addLine("");
     addLine("** ** ** ** ** ** ** ** ** ** **");
     addLine("FUNCTION outputc");
-    addLine(28, ST, 3,-1,1, "Store return address");     // OUTPUTC
-    addLine(29, LD, 3,-2,1, "Load parameter");
-    addLine(30, OUTC, 3,3,3, "Output char");
-    addLine(31, LD, 3,-1,1, "Load return address");
-    addLine(32, LD, 1,0,1, "Adjust");
-    addLine(33, JMP, 7,0,3, "Return");
+    functionMap["outputc"] = addLine(ST, 3,-1,1, "Store return address");     // OUTPUTC
+    addLine(LD, 3,-2,1, "Load parameter");
+    addLine(OUTC, 3,3,3, "Output char");
+    addLine(LD, 3,-1,1, "Load return address");
+    addLine(LD, 1,0,1, "Adjust");
+    addLine(JMP, 7,0,3, "Return");
     addLine("END FUNCTION outputc");
     addLine("");
     addLine("** ** ** ** ** ** ** ** ** ** ** **");
     addLine("FUNCTION outnl");
-    addLine(34, ST, 3,-1,1, "Store return address");     // OUTNL
-    addLine(35, OUTNL, 3,3,3, "Output a newline");
-    addLine(36, LD, 3,-1,1, "Load return address");
-    addLine(37, LD, 1,0,1, "Adjust");
-    addLine(38, JMP, 7,0,3, "Return");
+    functionMap["outnl"] = addLine(ST, 3,-1,1, "Store return address");     // OUTNL
+    addLine(OUTNL, 3,3,3, "Output a newline");
+    addLine(LD, 3,-1,1, "Load return address");
+    addLine(LD, 1,0,1, "Adjust");
+    addLine(JMP, 7,0,3, "Return");
     addLine("END FUNCTION outnl");
-
-    // set start value for PC
-    pmem = 39;
-    // set offsets to invalid values
-    goffset = 1;
-    loffset = 1;
-    toffset = 0;
+    addLine("** ** ** ** ** ** ** ** ** ** ** **");
 }
 
 /*
  *  Insert code to jump to load return, jump to main, and call halt
  */
 void CodeGenerator::generateInit(){
-    addLine(0, JMP, 7, main_ret_loc, 7, "JMP to init");
+    addLine(JMP, 7, main_ret_loc, 7, "JMP to init");
 
     // INIT
     addLine("INIT");
-    addLine(pmem++, LDA, 3, 1, 7, "return address in ac");
-    addLine(pmem++, ST, 1, 0, 1, "store old ");
+    addLine(LDA, 1, 0, 0, "return address in ac");
+    addLine(ST, 1, 0, 1, "store old ");
 
-    // INIT GLOBALS AND STATICS
+    addLine("INIT GLOBALS AND STATICS");
     // TODO: init globals and statics
+    addLine("END INIT GLOBALS AND STATICS");
 
-    addLine(pmem++, LDA, 3, 1, 7, "return address in ac");
+    addLine(LDA, 3, 1, 7, "return address in ac");
     // Jump to main in pmem
-    addLine(pmem++, JMP, 7, (main_loc - 1) - pmem, 7, "jump to main");
-    addLine(pmem++, HALT, 0, 0, 0, "END EXECUTION");
+    addLine(JMP, 7, (main_loc - 2) - pmem, 7, "jump to main");
+    addLine(HALT, 0, 0, 0, "END EXECUTION");
     addLine("END INIT");
 }
 
@@ -434,16 +431,22 @@ void CodeGenerator::addLine(TMInstruction* tm_ins){
     }
 }
 
-void CodeGenerator::addLine(std::string comment){
-    addLine(new TMInstruction(comment));
+TMInstruction* CodeGenerator::addLine(std::string comment){
+    TMInstruction* ins = new TMInstruction(comment);
+    addLine(ins);
+    return ins;
 }
 
-void CodeGenerator::addLine(int mem, Instruction ins, int addr, int addr1, int addr2, std::string comment){
-    addLine(new TMInstruction(mem, ins, addr, addr1, addr2, comment));
+TMInstruction* CodeGenerator::addLine(Instruction ins, int addr, int addr1, int addr2, std::string comment){
+    TMInstruction* instruct = new TMInstruction(pmem++, ins, addr, addr1, addr2, comment);
+    addLine(instruct);
+    return instruct;
 }
 
-void CodeGenerator::addLine(int mem, Instruction ins, LType ltype, void* cVal, std::string comment){
-    addLine(new TMInstruction(mem, ins, ltype, cVal, comment));
+TMInstruction* CodeGenerator::addLine(Instruction ins, LType ltype, void* cVal, std::string comment){
+    TMInstruction* instruct = new TMInstruction(pmem++, ins, ltype, cVal, comment);
+    addLine(instruct);
+    return instruct;
 }
 
 /*
@@ -463,6 +466,14 @@ void CodeGenerator::insertLine(TMInstruction* new_line, TMInstruction* target_li
         TMInstruction* tmp = target_line->tail;
         tmp->head = new_line;
     }
+
+    // update PC for all nodes to make sure they are in order
+    int pc = new_line->head->address;
+    TMInstruction* tmp = new_line;
+    while(tmp != NULL){
+        tmp->address = pc++;
+    }
+    pmem = pc;
 }
 
 /*
@@ -492,199 +503,97 @@ TMInstruction* CodeGenerator::removeLine(TMInstruction* target){
     return target;
 }
 
-// Tree Traversal Functions ////////////////////////////////////////////////////
-/*
- *  Traverse the tree for the first time and generate as much code for the tree
- *  as possible
- */
-void CodeGenerator::generateCode(ASTreeNode* root){
-    // if location is valid for this node, update loffset
-    if(root->loc < 0) loffset = root->loc;
-    // generate prep code for this node
-    generateInitCode(root); // generate comments, header code, and as much reusable code as possible for this node type
+void CodeGenerator::genCode(ASTreeNode* n, int offset, bool genSibling){
+    if(n == NULL) return; // protect against disaster
 
-    for(int i = 0; i < 3; i++){
-        // TODO: generate prep code for ith child
-        if(root->children[i] != NULL){
-            generateCode(root->children[i]);
-        }
-    }
-
-    // TODO: generate post proc code, like return from function
-    generatePostProc(root);
-    // reset any flags here
-    if(isCallChild == true && root->nodekind == ExpK && root->subkind.exp == CallK) isCallChild = false; // reset the flag
-
-    if(root->sibling != NULL) generateCode(root->sibling);
-}
-
-/*
- *  Generate code that does not change between programs such as the code for the I/O library,
- *  functions, compound statements, etc
- */
-void CodeGenerator::generateInitCode(ASTreeNode* n){
     switch(n->nodekind){
         case DeclK:
-            if(n->subkind.decl == FuncK) generateFunc(n);
-            else if(n->subkind.decl == VarK) generateVar(n);
-            else if(n->subkind.decl == ParamK){ printf("generating for param\n"); generateParam(n);}
+            switch(n->subkind.decl){
+                case FuncK:
+                    offset = -2 - n->num_params;
+                    addLine("FUNCTION " + string(n->attrib.name));
+                    addLine("TOFF dec: " + to_string(offset));
+                    functionMap[n->attrib.name] = addLine(ST, 3, -1, 1, "Store return address");
+                    genCode(n->children[1], offset, true); // generate compound
+                    addLine("Add standard closing in case there is no return statement");
+                    addLine(LDC, 2, 0, 6, "Set return value 0");
+                    genReturn(n);
+                    break;
+                case ParamK:
+                    break;
+                case VarK:
+                    break;
+            }
+            break;
         case StmtK:
             switch(n->subkind.stmt){
-                case NullK:
-                    return;
-
-                case IfK:
-                    return;
-
-                case WhileK:
-                    return;
-
-                case ForK:
-                    return;
-
                 case CompoundK:
-                    printf("generating for compound\n");
-                    generateCompound(n);
-                    return;
-
+                    reset_pt = offset;
+                    addLine("COMPOUND");
+                    addLine("TOFF set: " + to_string(offset));
+                    addLine("Compound Body");
+                    genCode(n->children[1], offset, true);
+                    offset = reset_pt;
+                    addLine("TOFF set: " + to_string(offset));
+                    addLine("END COMPOUND");
+                    break;
                 case ReturnK:
-                    generateReturn(n);
-                    return;
-                case BreakK:
-                    return;
-                case RangeK:
-                    return;
+                    addLine("RETURN");
+                    genCode(n->children[0], offset, true);
+                    addLine(LDA, 2, 0, 3, "Copy result to return register");
+                    addLine(LD, 3, -1, 1, "Load return address");
+                    addLine(LD, 1, 0, 1, "Adjust fp");
+                    addLine(JMP, 7, 0, 3, "Return");
+                    addLine("END RETURN");
+                    genSibling = false;
+                    break;
             }
+            break;
         case ExpK:
             switch(n->subkind.exp){
                 case ConstantK:
-                    //TODO: RESUME and add parameterize here
-                    if(isCallChild) addLine("PARAM");
-                    // load the constant
-                    if(n->type == Integer) addLine(pmem++, LDC, 3, atof(n->attrib.name), 0, "load constant");
-                    else if(n->type == Boolean) addLine(pmem++, LDC, 3, strcmp(n->attrib.name, "true") == 0, 0, "Load Boolean constant");
-                    else if(n->type == Char) addLine(pmem++, LDC, 3, *(n->attrib.name), 0, "load const char");
-                    else if(n->type == CharInt) addLine(pmem++, LDC, 3, *(n->attrib.name), 0, "load const string");
-                    if(isCallChild){
-                        // generate the ST command
-                        addLine(pmem++, ST, 3, --toffset, 1, "Push parameter"); // TODO: should be loc + current offset
-                        addLine("END PARAM");
+                    switch(n->type){
+                        case Integer:
+                            addLine(LDC, 3,atoi(n->attrib.name), 6, "Load integer constant");
+                            break;
+                        case Boolean:
+                            addLine(LDC, 3, strcmp(n->attrib.name, "true") == 0, 6, "Load boolean constant");
+                            break;
+                        case Char:
+                            addLine(LDC, 3, n->attrib.name[1], 6, "Load char constant");
+                            break;
+                        // TODO: add STRINGCONST
                     }
                     break;
                 case CallK:
-                    generateCall(n);
-                    isCallChild = true;
+                    reset_pt = offset;
+                    addLine("CALL " + string(n->attrib.name));
+                    addLine(ST, 1, offset, 1, "Store fp in ghost frame for output");
+                    addLine("TOFF dec: " + to_string(--offset));
+                    // generate code for arguments
+                    genArgs(n->children[0], --offset, 0);
+                    addLine(LDA, 1, offset, 1, "Ghost frame becomes new active frame");
+                    addLine(LDA, 3, 1, 7, "Return address in ac");
+                    addLine(JMP, 7, pmem - functionMap[n->attrib.name]->address, 7, "CALL " + string(n->attrib.name));
+                    addLine(LDA, 3, 0, 2, "Save the result in ac");
+                    offset = reset_pt;
+                    addLine("Call end " + string(n->attrib.name));
                     break;
             }
+            break;
     }
+
+    if(genSibling){genCode(n->sibling, offset, true);}
 }
 
-void CodeGenerator::generateFunc(ASTreeNode* n){
-    std::ofstream file;
-    addLine("\n* ** ** ** ** ** ** ** ** ** ** ** **");
-    addLine("FUNCTION " + std::string(n->attrib.name));
-    loffset = -2 - n->num_params;
-    addLine("TOFF dec: "+ std::to_string(loffset));
-    addLine(pmem++, ST, 3, -1, 1, "Store return address");
-    // if this is the main function, store it's location so we can go back
-    if(strcmp(n->attrib.name, "main") == 0 && n->num_params == 0) main_loc = pmem;
-}
-
-void CodeGenerator::generateVar(ASTreeNode* n){
-}
-
-// code for params in a function definition
-void CodeGenerator::generateParam(ASTreeNode* n){
-    addLine(pmem++, LD, 3, n->loc, 1, "Load param " + std::string(n->attrib.name));
-}
-
-// generate the code for arguments passed to a function call
-void CodeGenerator::generateArg(ASTreeNode* n, int i){
-    addLine("PARAM" + atof(i));
-    // load the constant
-    if(n->type == Integer) addLine(pmem++, LDC, 3, atof(n->attrib.name), 0, "load constant");
-    else if(n->type == Boolean) addLine(pmem++, LDC, 3, strcmp(n->attrib.name, "true") == 0, 0, "Load Boolean constant");
-    else if(n->type == Char) addLine(pmem++, LDC, 3, *(n->attrib.name), 0, "load const char");
-    else if(n->type == CharInt) addLine(pmem++, LDC, 3, *(n->attrib.name), 0, "load const string");
-
-    // generate the ST command
-    addLine(pmem++, ST, 3, --toffset, 1, "Push parameter"); // TODO: should be loc + current offset
-    addLine("END PARAM");
-
-    if(n->sibling != NULL) generateArg(n->sibling);
-    else{isCallChild = false;} // stop generating code for the params
-}
-
-void CodeGenerator::generateCompound(ASTreeNode* n){
-    addLine("Compound");
-}
-
-void CodeGenerator::generateReturn(ASTreeNode* n){
-    if(n->children[0] == NULL){
-        // generate default
-        addLine(pmem++, LD, 3, -1, 1, "recover old pc");
-
-        addLine(pmem++, LD, 1, 0, 1, "pop the frame");
-
-        addLine(pmem++, JMP, 7, 0, 3, "Return");
-    }
-}
-
-void CodeGenerator::generateCall(ASTreeNode* n){
-    addLine("CALLING " + std::string(n->attrib.name));
-    // set toffset relative to loffset, then all decrements for params are done to toffset
-    toffset = loffset;
-    // Save the frame pointer(loffset) in data memory
-    addLine("TOFF dec: " + std::to_string(toffset - 1));
-    addLine(pmem++, ST, 1, loffset, 1, "store frame pointer in dmem");
-}
-
-void CodeGenerator::generatePostProc(ASTreeNode* n){
-    if(n->nodekind == DeclK){
-        if(n->subkind.decl == FuncK){
-            genFunCleanup(n);
-        }
-    }else if(n->nodekind == StmtK){
-        if(n->subkind.stmt == CompoundK){
-            addLine("END COMPOUND");
-        }else if(n->subkind.stmt == ReturnK){
-            // A default return is included for main in case there is no return statement
-            if(strcmp(n->attrib.name, "main") == 0 && n->num_params == 0){
-                genReturnCleanup(n);
-            }
-        }
-    }else if(n->nodekind == ExpK){
-        if(n->subkind.exp == CallK) genCallCleanup(n);
-    }
-}
-
-/*
- *  Adds the code to return from a call
- */
-void CodeGenerator::genFunCleanup(ASTreeNode* n){
-    // TODO: this needs to be changed to return an actual meaningful value
-    addLine(pmem++, LDA, 2, 0, 6, "load function return with a value in register xxx");
-    addLine(pmem++, LD, 3, -1, 1, "recover old pc");
-    addLine(pmem++, LD, 1, 0, 1, "pop the frame");
-    addLine(pmem++, JMP, 7, 0, 3, "jump to old pc");
+void CodeGenerator::genReturn(ASTreeNode* n){
+    addLine(LD, 3, -1, 1, "Adjust fp");
+    addLine(LD, 1, 0, 1, "Return");
+    if(strcmp(n->attrib.name, "main") == 0 && n->num_params == 0) main_ret_loc = pmem;
+    addLine(JMP, 7, 0, 3, "jump to old pc");
     addLine("END FUNCTION " + std::string(n->attrib.name));
     addLine("");
+
 }
 
-void CodeGenerator::genReturnCleanup(ASTreeNode* n){
-    TMInstruction* new_ins;
-    addLine("Add default return in case there is no return statement");
-    addLine(pmem++, LDC, 2, 0, 0, "save return value");
-    addLine(pmem++, LD, 3, -1, 1, "recover old pc");
-    addLine(pmem++, LD, 1, 0, 1, "pop the frame");
-    addLine(pmem++, JMP, 7, 0, 3, "Return");
-}
-
-void CodeGenerator::genCallCleanup(ASTreeNode* n){
-    // load the parameters using the form below
-    addLine(pmem++, LDA, 1, loffset, 1, "Ghost frame becomes new active frame");
-    addLine(pmem++, LDA, 3, 1, 7, "Return address in ac");
-    addLine(pmem++, JMP, 7, -27, 7, "Call " + std::string(n->attrib.name));
-    addLine(pmem++, LDA, 3,0,2, "Save result in ac");
-    addLine("END CALL " + std::string(n->attrib.name));
-}
+void CodeGenerator::genArgs(ASTreeNode* n, int offset, int arg_num);

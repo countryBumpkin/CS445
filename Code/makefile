@@ -1,5 +1,5 @@
-SRC=parser.y parser.l ourgetopt.cpp semantic.cpp symbolTable.cpp TreeUtils.cpp yyerror.cpp parseerror.cpp memloc.cpp codegen.cpp
-HEADERS=scanType.h ASTreeNode.h ourgetopt.h semantic.h symbolTable.h TreeUtils.h yyerror.h parseerror.h memloc.h codegen.h
+SRC=parser.y parser.l ourgetopt.cpp semantic.cpp symbolTable.cpp TreeUtils.cpp yyerror.cpp parseerror.cpp memloc.cpp codegen.cpp emitcode.cpp
+HEADERS=scanType.h ASTreeNode.h ourgetopt.h semantic.h symbolTable.h TreeUtils.h yyerror.h parseerror.h memloc.h codegen.h emitcode.h
 STD=c++11
 
 parser: clean bison flex

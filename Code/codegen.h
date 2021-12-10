@@ -5,6 +5,7 @@
 #include <fstream>
 #include <string>
 #include "emitcode.cpp"
+#include "offsetstack.cpp"
 
 FILE* code; // pointer to testfile.tm, needed by emitcode
 
@@ -21,6 +22,7 @@ enum Instruction {
                 };
 
 enum LType {DEFAULT, STR_LIT, NUM_LIT, BOOL_LIT}; // denotes what type of literal this is
+
 
 /*
     Describes all internal data associated with a single "instruction" or line of 3 address code and provides
@@ -61,7 +63,7 @@ class CodeGenerator {
         int main_loc;               // stores the address in program memory for main
         int main_ret_loc;           // store the pmem address of the main return stmt, used in init
 
-        int reset_pt;
+        OffsetStack toff_stack;     // stores the current temporary offset at top of stack
 
         // imperfect solution, can't handle multiple definitions of single function name
         std::map<std::string, TMInstruction*> functionMap; // function names mapping to instructions
@@ -86,8 +88,10 @@ class CodeGenerator {
         void genCode(ASTreeNode* n, int offset, bool genSibling);
         void genReturn(ASTreeNode*);
         void genArgs(ASTreeNode*, int, int);
+        void genId(ASTreeNode*);
 
         void generateInit();
+        void loadConst(ASTreeNode*);
 
     public:
         CodeGenerator(ASTreeNode*);     // Generate code based on the AST passed to the generator

@@ -1,6 +1,3 @@
-TEST=a03
+TEST=a05
 DIR=../UnitTests
-
-make parser
-
 ./c- ${DIR}/${TEST}.c- 

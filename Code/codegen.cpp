@@ -105,7 +105,7 @@ std::string TMInstruction::to_string(){
             }
         default: // all others
             std::string tag = std::to_string(this->address) + ":\t" + instructionToStr();
-            return tag + "\t" + std::to_string(this->addrs[0]) + ", " + std::to_string(this->addrs[1]) + ", " + std::to_string(this->addrs[1]) + " " + this->comment;
+            return tag + "\t" + std::to_string(this->addrs[0]) + ", " + std::to_string(this->addrs[1]) + ", " + std::to_string(this->addrs[2]) + " " + this->comment;
     }
 }
 
@@ -314,24 +314,6 @@ void CodeGenerator::init(){
     addLine("END FUNCTION input");
     addLine("");
     addLine("** ** ** ** ** ** ** ** ** ** ** **");
-    addLine("END FUNCTION inputb");
-    functionMap["inputb"] = addLine(ST, 3,-1,1, "Store return address");
-    addLine(INB, 2,2,2, "Grab bool input");
-    addLine(LD, 3,-1,1, "Load return address");
-    addLine(LD, 1,0,1, "Adjust fp");
-    addLine(JMP, 7,0,3, "Return");
-    addLine("END FUNCTION inputb");
-    addLine("");
-    addLine("** ** ** ** ** ** ** ** ** ** ** **");
-    addLine("FUNCTION inputc");
-    functionMap["inputc"] = addLine(ST, 3,-1,1, "Store return address");    // INPU
-    addLine(INC_tm, 2,2,2, "Grab char input");
-    addLine(LD, 3,-1,1, "Load return address");
-    addLine(LD, 1,0,1, "Adjust");
-    addLine(JMP, 7,0,3, "Return");
-    addLine("END FUNCTION inputc");
-    addLine("");
-    addLine("** ** ** ** ** ** ** ** ** ** ** **");
     addLine("FUNCTION output");
     functionMap["output"] = addLine(ST, 3,-1,1, "Store return address");     // OUTPUT
     addLine(LD, 3,-2,1, "Load parameter");
@@ -342,6 +324,15 @@ void CodeGenerator::init(){
     addLine("END FUNCTION output");
     addLine("");
     addLine("** ** ** ** ** ** ** ** ** ** ** **");
+    addLine("END FUNCTION inputb");
+    functionMap["inputb"] = addLine(ST, 3,-1,1, "Store return address");
+    addLine(INB, 2,2,2, "Grab bool input");
+    addLine(LD, 3,-1,1, "Load return address");
+    addLine(LD, 1,0,1, "Adjust fp");
+    addLine(JMP, 7,0,3, "Return");
+    addLine("END FUNCTION inputb");
+    addLine("");
+    addLine("** ** ** ** ** ** ** ** ** ** ** **");
     addLine("FUNCTION outputb");
     functionMap["outputb"] = addLine(ST, 3,-1,1, "Store return address");     // OUTPUTB
     addLine(LD, 3,-2,1, "Load parameter");
@@ -350,6 +341,15 @@ void CodeGenerator::init(){
     addLine(LD, 1,0,1, "Adjust");
     addLine(JMP, 7,0,3, "Return");
     addLine("END FUNCTION outputb");
+    addLine("");
+    addLine("** ** ** ** ** ** ** ** ** ** ** **");
+    addLine("FUNCTION inputc");
+    functionMap["inputc"] = addLine(ST, 3,-1,1, "Store return address");    // INPU
+    addLine(INC_tm, 2,2,2, "Grab char input");
+    addLine(LD, 3,-1,1, "Load return address");
+    addLine(LD, 1,0,1, "Adjust");
+    addLine(JMP, 7,0,3, "Return");
+    addLine("END FUNCTION inputc");
     addLine("");
     addLine("** ** ** ** ** ** ** ** ** ** **");
     addLine("FUNCTION outputc");
@@ -376,8 +376,10 @@ void CodeGenerator::init(){
  *  Insert code to jump to load return, jump to main, and call halt
  */
 void CodeGenerator::generateInit(){
+    int tmp = pmem;
+    pmem = 0;
     addLine(JMP, 7, main_ret_loc, 7, "JMP to init");
-
+    pmem = tmp;
     // INIT
     addLine("INIT");
     addLine(LDA, 1, 0, 0, "return address in ac");
@@ -389,7 +391,7 @@ void CodeGenerator::generateInit(){
 
     addLine(LDA, 3, 1, 7, "return address in ac");
     // Jump to main in pmem
-    addLine(JMP, 7, (main_loc - 2) - pmem, 7, "jump to main");
+    addLine(JMP, 7, (main_loc) - pmem - 1, 7, "jump to main");
     addLine(HALT, 0, 0, 0, "END EXECUTION");
     addLine("END INIT");
 }
@@ -505,14 +507,16 @@ TMInstruction* CodeGenerator::removeLine(TMInstruction* target){
 
 void CodeGenerator::genCode(ASTreeNode* n, int offset, bool genSibling){
     if(n == NULL) return; // protect against disaster
-
+    int reset_pt;
     switch(n->nodekind){
         case DeclK:
             switch(n->subkind.decl){
                 case FuncK:
                     offset = -2 - n->num_params;
+                    if(n->num_params == 0 && !strcmp(n->attrib.name, "main")) main_loc = pmem;
                     addLine("FUNCTION " + string(n->attrib.name));
-                    addLine("TOFF dec: " + to_string(offset));
+                    offset -= n->num_params;
+                    addLine("TOFF set: " + to_string(offset));
                     functionMap[n->attrib.name] = addLine(ST, 3, -1, 1, "Store return address");
                     genCode(n->children[1], offset, true); // generate compound
                     addLine("Add standard closing in case there is no return statement");
@@ -528,7 +532,8 @@ void CodeGenerator::genCode(ASTreeNode* n, int offset, bool genSibling){
         case StmtK:
             switch(n->subkind.stmt){
                 case CompoundK:
-                    reset_pt = offset;
+                    reset_pt = offset; // store toff for when we leave it again
+                    offset = n->size;
                     addLine("COMPOUND");
                     addLine("TOFF set: " + to_string(offset));
                     addLine("Compound Body");
@@ -551,20 +556,31 @@ void CodeGenerator::genCode(ASTreeNode* n, int offset, bool genSibling){
             break;
         case ExpK:
             switch(n->subkind.exp){
-                case ConstantK:
-                    switch(n->type){
-                        case Integer:
-                            addLine(LDC, 3,atoi(n->attrib.name), 6, "Load integer constant");
-                            break;
-                        case Boolean:
-                            addLine(LDC, 3, strcmp(n->attrib.name, "true") == 0, 6, "Load boolean constant");
-                            break;
-                        case Char:
-                            addLine(LDC, 3, n->attrib.name[1], 6, "Load char constant");
-                            break;
-                        // TODO: add STRINGCONST
+                case OpK:
+                    {
+                        genCode(n->children[0], offset, true);
+                        addLine(ST, 3, offset, 1, "Push left side");
+                        addLine("TOFF dec: " + to_string(--offset));
+                        genCode(n->children[1], offset, true);
+                        addLine("TOFF inc: " + to_string(++offset));
+                        addLine(LD, 4, -4, 1, "Pop left into ac1");
+                        // gen ALU-ish instruction
+                        string op = string(n->attrib.name);
+                        if(op == "*") addLine(MUL, 3, 4, 3, "Op *");
+                        else if(op == "+") addLine(ADD_tm, 3, 3, 4, "Op +");
+                        else if(op == "-") addLine(SUB_tm, 3, 3, 4, "Op -");
+                        else if(op == "/") addLine(DIV_tm, 3, 4, 3, "Op /");
+                        else if(op == "%") addLine(MOD_tm, 3, 4, 3, "Op %");
+                        break;
                     }
+                case ConstantK:
+                    loadConst(n);
                     break;
+
+                case IdK:
+                    genId(n);
+                    break;
+
                 case CallK:
                     reset_pt = offset;
                     addLine("CALL " + string(n->attrib.name));
@@ -572,12 +588,21 @@ void CodeGenerator::genCode(ASTreeNode* n, int offset, bool genSibling){
                     addLine("TOFF dec: " + to_string(--offset));
                     // generate code for arguments
                     genArgs(n->children[0], --offset, 0);
+                    addLine("Param end " + string(n->attrib.name));
+                    offset = reset_pt;
                     addLine(LDA, 1, offset, 1, "Ghost frame becomes new active frame");
                     addLine(LDA, 3, 1, 7, "Return address in ac");
-                    addLine(JMP, 7, pmem - functionMap[n->attrib.name]->address, 7, "CALL " + string(n->attrib.name));
+                    addLine(JMP, 7, functionMap[n->attrib.name]->address - pmem - 1, 7, "CALL " + string(n->attrib.name));
                     addLine(LDA, 3, 0, 2, "Save the result in ac");
-                    offset = reset_pt;
                     addLine("Call end " + string(n->attrib.name));
+                    addLine("TOFF set: " + to_string(offset));
+                    break;
+                case AssignK:
+                    addLine("EXPRESSION");
+                    // provide for array element assignment
+                    // provide for assigning character array
+                    genCode(n->children[1], offset, true);
+                    addLine(ST, 3, n->children[0]->loc, n->children[0]->varkind == Local || n->children[0]->varkind == Parameter, "Store variable " + string(n->children[0]->attrib.name));
                     break;
             }
             break;
@@ -596,4 +621,62 @@ void CodeGenerator::genReturn(ASTreeNode* n){
 
 }
 
-void CodeGenerator::genArgs(ASTreeNode* n, int offset, int arg_num);
+/*
+ * Generate the instructions for loading args to function calls
+ */
+void CodeGenerator::genArgs(ASTreeNode* n, int toff, int arg_num){
+    addLine("TOFF dec: " + to_string(toff));
+    if(n == NULL) return;
+
+    addLine("Param " + to_string(arg_num + 1));
+    genCode(n, toff, false);
+    addLine(ST, 3, toff, 1, "Push parameter");
+    addLine("Param end");
+
+    genArgs(n->sibling, toff - 1, arg_num++);
+}
+
+/*
+ *  Generate code for IdK expressions
+ */
+void CodeGenerator::genId(ASTreeNode* n){
+    if(n->varkind == Global){   // Global
+        if(n->isArray){
+            addLine(LDA, 3, n->loc, 0, "Load address of base of array " + string(n->attrib.name));
+        }else{
+            addLine(LD, 3, n->loc, 0, "retrieve global variable " + string(n->attrib.name));
+        }
+    }else{                      // Local
+        if(n->isArray){
+            // tricky business
+            if(n->varkind == Parameter){
+                // load params indirectly...
+                addLine(LD, 3, n->loc, 1, "Load address of base of array " + string(n->attrib.name));
+            }else {
+                // load non-params directly...
+                addLine(LDA, 3, n->loc, n->varkind == Local, "Load address of base of array " + string(n->attrib.name));
+            }
+        }else{
+            addLine(LD, 3, n->loc, n->varkind == Local || n->varkind == Parameter, "retrieve local variable " + string(n->attrib.name));
+        }
+    }
+}
+
+/*
+ *  Helper function for loading a constant into memory
+ */
+void CodeGenerator::loadConst(ASTreeNode* n){
+    switch(n->type){
+        case Integer:
+            addLine(LDC, 3,atoi(n->attrib.name), 6, "Load integer constant");
+            break;
+        case Boolean:
+            addLine(LDC, 3, strcmp(n->attrib.name, "true") == 0, 6, "Load boolean constant");
+            break;
+        case Char:
+            addLine(LDC, 3, n->attrib.name[1], 6, "Load char constant");
+            break;
+        // TODO: add STRINGCONST
+    }
+
+}

@@ -634,6 +634,9 @@ void compileNoArgs(char* argv[]){
         // CODE GEN
         if(sa.getErrors() == 0){ // check redundant, here just to separate code
             // traverse AST tree in one(or more) passes and construct 3 address code for tm.c
+            printf("Number of warnings: %d\n", sa.getWarnings());
+            printf("Number of errors: %d\n", sa.getErrors());
+
             CodeGenerator cg(treeRec);
         }
     }
@@ -646,6 +649,7 @@ int main(int argc, char *argv[]){
     int c;
     c = ourGetopt( argc, argv, (char *)"pPdDMh" );
     int goodArgs = 0;
+    printf("parse args\n");
     while(c != -1) {
         goodArgs++;
  		switch ( c )
@@ -681,13 +685,15 @@ int main(int argc, char *argv[]){
             default:
                 printf("ignoring %i\n", c);
         }
-        //c = ourGetopt( argc, argv, (char *)"pd" );
+        c = ourGetopt( argc, argv, (char *)"pdDhMP" );
     }
-    if(c == -1 && argc > 1){ // if no arguments provided with file, run semantic check, memory allocation, and if no errors do code gen
+    if(goodArgs == 0 && argc > 1){ // if no arguments provided with file, run semantic check, memory allocation, and if no errors do code gen
+        printf("compile no args\n");
         compileNoArgs(argv);
 
     }else if (argc > 1) // open file passed for compiling
     {
+        printf("compiling args\n");
         int fileIndex = 1 + goodArgs;
         if ((yyin = fopen(argv[fileIndex], "r"))){
             // file open successful

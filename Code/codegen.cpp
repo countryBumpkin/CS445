@@ -558,19 +558,38 @@ void CodeGenerator::genCode(ASTreeNode* n, int offset, bool genSibling){
             switch(n->subkind.exp){
                 case OpK:
                     {
-                        genCode(n->children[0], offset, true);
-                        addLine(ST, 3, offset, 1, "Push left side");
-                        addLine("TOFF dec: " + to_string(--offset));
-                        genCode(n->children[1], offset, true);
-                        addLine("TOFF inc: " + to_string(++offset));
-                        addLine(LD, 4, -4, 1, "Pop left into ac1");
-                        // gen ALU-ish instruction
                         string op = string(n->attrib.name);
-                        if(op == "*") addLine(MUL, 3, 4, 3, "Op *");
-                        else if(op == "+") addLine(ADD_tm, 3, 3, 4, "Op +");
-                        else if(op == "-") addLine(SUB_tm, 3, 3, 4, "Op -");
-                        else if(op == "/") addLine(DIV_tm, 3, 4, 3, "Op /");
-                        else if(op == "%") addLine(MOD_tm, 3, 4, 3, "Op %");
+                        genCode(n->children[0], offset, true);
+                        // UNARY OPs
+                        if(op == "chsign") addLine(NEG, 3, 3, 3, "Op unary -");
+                        else if(op == "sizeof") addLine("sizeof he");
+                        else if(op == "?") addLine(RND, 3, 3, 6, "Op ?");
+                        else if(op == "not"){
+                                addLine(LDC, 4, 1, 6, "Load 1");
+                                addLine(XOR, 3, 3, 4, "Op XOR to get logical not");
+
+                        }else{ // BINARY OPs
+                            addLine(ST, 3, offset, 1, "Push left side");
+                            addLine("TOFF dec: " + to_string(--offset));
+                            genCode(n->children[1], offset, true);
+                            addLine("TOFF inc: " + to_string(++offset));
+                            addLine(LD, 4, offset, 1, "Pop left into ac1");
+                            //  mathematical operations
+                            if(op == "*")       addLine(MUL, 3, 4, 3, "Op *");
+                            else if(op == "+")  addLine(ADD_tm, 3, 3, 4, "Op +");
+                            else if(op == "-")  addLine(SUB_tm, 3, 4, 3, "Op -");
+                            else if(op == "/")  addLine(DIV_tm, 3, 4, 3, "Op /");
+                            else if(op == "%")  addLine(MOD_tm, 3, 4, 3, "Op %");
+                            //  boolean operations
+                            else if(op == "and")    addLine(AND_tm, 3,4,3, "Op AND");
+                            else if(op == "or")     addLine(OR_tm, 3,4,3, "Op OR");
+                            else if(op == "=")      addLine(TEQ, 3, 4, 3, "Op =");
+                            else if(op == "<")      addLine(TLT, 3, 4, 3, "Op <");
+                            else if(op == ">")      addLine(TGT, 3, 4, 3, "Op >");
+                            else if(op == ">=")     addLine(TGE, 3,4,3, "Op >=");
+                            else if(op == "<=")     addLine(TLE, 3,4,3, "Op <=");
+                            else if(op == "><")     addLine(TNE, 3,4,3, "Op ><");
+                        }
                         break;
                     }
                 case ConstantK:

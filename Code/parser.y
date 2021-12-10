@@ -649,7 +649,6 @@ int main(int argc, char *argv[]){
     int c;
     c = ourGetopt( argc, argv, (char *)"pPdDMh" );
     int goodArgs = 0;
-    printf("parse args\n");
     while(c != -1) {
         goodArgs++;
  		switch ( c )
@@ -688,12 +687,10 @@ int main(int argc, char *argv[]){
         c = ourGetopt( argc, argv, (char *)"pdDhMP" );
     }
     if(goodArgs == 0 && argc > 1){ // if no arguments provided with file, run semantic check, memory allocation, and if no errors do code gen
-        printf("compile no args\n");
         compileNoArgs(argv);
 
     }else if (argc > 1) // open file passed for compiling
     {
-        printf("compiling args\n");
         int fileIndex = 1 + goodArgs;
         if ((yyin = fopen(argv[fileIndex], "r"))){
             // file open successful

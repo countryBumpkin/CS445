@@ -62,6 +62,7 @@ class CodeGenerator {
         int pmem;                   // store the address of the next instruction here
         int main_loc;               // stores the address in program memory for main
         int main_ret_loc;           // store the pmem address of the main return stmt, used in init
+        int goffset;
 
         OffsetStack toff_stack;     // stores the current temporary offset at top of stack
 
@@ -89,6 +90,7 @@ class CodeGenerator {
         void genReturn(ASTreeNode*);
         void genArgs(ASTreeNode*, int, int);
         void genId(ASTreeNode*);
+        void genOpAssign(ASTreeNode*, std::string, int, std::string);
 
         void generateInit();
         void loadConst(ASTreeNode*);

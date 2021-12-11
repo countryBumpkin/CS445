@@ -285,6 +285,7 @@ CodeGenerator::CodeGenerator(ASTreeNode* root){
     init();
     // attach pointer to code so we can use emitcode.h
     code = fopen("testfile.tm", "a");
+    goffset = 1;
     genCode(root, 0, true);
     generateInit();
     appendToFile();
@@ -382,7 +383,8 @@ void CodeGenerator::generateInit(){
     pmem = tmp;
     // INIT
     addLine("INIT");
-    addLine(LDA, 1, 0, 0, "return address in ac");
+    // set frame at end of globals
+    addLine(LDA, 1, --goffset, 0, "set first frame at end of globals");
     addLine(ST, 1, 0, 1, "store old ");
 
     addLine("INIT GLOBALS AND STATICS");
@@ -507,6 +509,7 @@ TMInstruction* CodeGenerator::removeLine(TMInstruction* target){
 
 void CodeGenerator::genCode(ASTreeNode* n, int offset, bool genSibling){
     if(n == NULL) return; // protect against disaster
+    cout << "gen code for " << n->attrib.name << endl;
     int reset_pt;
     switch(n->nodekind){
         case DeclK:
@@ -526,6 +529,9 @@ void CodeGenerator::genCode(ASTreeNode* n, int offset, bool genSibling){
                 case ParamK:
                     break;
                 case VarK:
+                    if(n->varkind == Global){
+                        goffset = n->loc;
+                    }
                     break;
             }
             break;
@@ -559,19 +565,21 @@ void CodeGenerator::genCode(ASTreeNode* n, int offset, bool genSibling){
                 case OpK:
                     {
                         string op = string(n->attrib.name);
+                        cout << "gen lhs" << endl;
                         genCode(n->children[0], offset, true);
                         // UNARY OPs
                         if(op == "chsign") addLine(NEG, 3, 3, 3, "Op unary -");
-                        else if(op == "sizeof") addLine("sizeof he");
+                        else if(op == "sizeof") addLine("sizeof here");
                         else if(op == "?") addLine(RND, 3, 3, 6, "Op ?");
                         else if(op == "not"){
-                                addLine(LDC, 4, 1, 6, "Load 1");
-                                addLine(XOR, 3, 3, 4, "Op XOR to get logical not");
-
+                            addLine(LDC, 4, 1, 6, "Load 1");
+                            addLine(XOR, 3, 3, 4, "Op XOR to get logical not");
                         }else{ // BINARY OPs
-                            addLine(ST, 3, offset, 1, "Push left side");
+                            // gen binary
+                            addLine(ST, 3, offset, 1, "Push left side"); // store lhs
                             addLine("TOFF dec: " + to_string(--offset));
-                            genCode(n->children[1], offset, true);
+                            cout << "gen rhs" << endl;
+                            genCode(n->children[1], offset, true); // gen rhs
                             addLine("TOFF inc: " + to_string(++offset));
                             addLine(LD, 4, offset, 1, "Pop left into ac1");
                             //  mathematical operations
@@ -589,6 +597,10 @@ void CodeGenerator::genCode(ASTreeNode* n, int offset, bool genSibling){
                             else if(op == ">=")     addLine(TGE, 3,4,3, "Op >=");
                             else if(op == "<=")     addLine(TLE, 3,4,3, "Op <=");
                             else if(op == "><")     addLine(TNE, 3,4,3, "Op ><");
+                            else if(op == "["){
+                                addLine(SUB_tm, 3, 4, 3, "Compute offset of value");
+                                addLine(LD, 3, 0, 3, "get value");
+                            }
                         }
                         break;
                     }
@@ -617,11 +629,50 @@ void CodeGenerator::genCode(ASTreeNode* n, int offset, bool genSibling){
                     addLine("TOFF set: " + to_string(offset));
                     break;
                 case AssignK:
+                    string op = n->attrib.name;
+                    if(op == "+="){
+                        genOpAssign(n, op, offset, "Op +=");
+                        break;
+                    }else if(op == "-="){
+                        genOpAssign(n, op, offset, "Op -=");
+                        break;
+                    }else if(op == "*="){
+                        genOpAssign(n, op, offset, "Op *=");
+                        break;
+                    }else if(op == "/="){
+                        genOpAssign(n, op, offset, "Op /=");
+                        break;
+                    }
+
                     addLine("EXPRESSION");
                     // provide for array element assignment
-                    // provide for assigning character array
-                    genCode(n->children[1], offset, true);
-                    addLine(ST, 3, n->children[0]->loc, n->children[0]->varkind == Local || n->children[0]->varkind == Parameter, "Store variable " + string(n->children[0]->attrib.name));
+                    if(!strcmp(n->children[0]->attrib.name, "[")){
+                        genCode(n->children[0]->children[1], offset-1, true);
+                        addLine(ST, 3, offset, 1, "Push index");
+                        addLine("TOFF dec: " + to_string(--offset));
+                        genCode(n->children[1], offset, true);
+                        addLine("TOFF inc: " + to_string(++offset));
+                        addLine(LD, 4, offset, 1, "Pop index");
+                        ASTreeNode* id = n->children[0]->children[0];
+                        if(id->varkind == Parameter){
+                            addLine(LD, 5, id->loc, 1, "(EXP PARAM) Load address of base of array " + string(id->attrib.name));
+                        }else{
+                            addLine(LDA, 5, id->loc, 0, "(EXP NONPARAM) Load address of base of array " + string(id->attrib.name));
+                        }
+
+                        addLine(SUB_tm, 5, 5, 4, "Compute offset of value");
+                        addLine(ST, 3, 0, 5, "Store variable " + string(id->attrib.name));
+                    }else if(n->children[0]->type == Char && n->children[0]->isArray){
+                        genCode(n->children[1], offset-1, true);
+                        addLine(LDA, 4, n->children[0]->loc, 1, "address of lhs");
+                        addLine(LD, 5, 1, 3, "size of rhs");
+                        addLine(LD, 6, 1, 4, "size of lhs");
+                        addLine(SWP, 5, 6, 6, "pick smallest size");
+                        addLine(MOV, 4, 3, 5, "array op =");
+                    }else{
+                        genCode(n->children[1], offset, true);
+                        addLine(ST, 3, n->children[0]->loc, n->children[0]->varkind == Local || n->children[0]->varkind == Parameter, "Store variable " + string(n->children[0]->attrib.name));
+                    }
                     break;
             }
             break;
@@ -646,7 +697,6 @@ void CodeGenerator::genReturn(ASTreeNode* n){
 void CodeGenerator::genArgs(ASTreeNode* n, int toff, int arg_num){
     addLine("TOFF dec: " + to_string(toff));
     if(n == NULL) return;
-
     addLine("Param " + to_string(arg_num + 1));
     genCode(n, toff, false);
     addLine(ST, 3, toff, 1, "Push parameter");
@@ -661,23 +711,69 @@ void CodeGenerator::genArgs(ASTreeNode* n, int toff, int arg_num){
 void CodeGenerator::genId(ASTreeNode* n){
     if(n->varkind == Global){   // Global
         if(n->isArray){
-            addLine(LDA, 3, n->loc, 0, "Load address of base of array " + string(n->attrib.name));
+            addLine(LDA, 3, n->loc, 0, "(GLOBAL)Load address of base of array " + string(n->attrib.name));
         }else{
-            addLine(LD, 3, n->loc, 0, "retrieve global variable " + string(n->attrib.name));
+            addLine(LD, 3, n->loc, 0, "Load variable " + string(n->attrib.name));
         }
     }else{                      // Local
         if(n->isArray){
             // tricky business
             if(n->varkind == Parameter){
                 // load params indirectly...
-                addLine(LD, 3, n->loc, 1, "Load address of base of array " + string(n->attrib.name));
+                addLine(LD, 3, n->loc, 1, "(PARAM)Load address of base of array " + string(n->attrib.name));
             }else {
                 // load non-params directly...
-                addLine(LDA, 3, n->loc, n->varkind == Local, "Load address of base of array " + string(n->attrib.name));
+                addLine(LDA, 3, n->loc, n->varkind == Local, "(NONPARAM)Load address of base of array " + string(n->attrib.name));
             }
         }else{
             addLine(LD, 3, n->loc, n->varkind == Local || n->varkind == Parameter, "retrieve local variable " + string(n->attrib.name));
         }
+    }
+}
+
+/*
+ *  Generate code for assignment operations ADDASS, SUBASS, MULASS, DIVASS.
+ */
+void CodeGenerator::genOpAssign(ASTreeNode* n, string op, int toff, string comment){
+    addLine("EXPRESSION");
+    if(!strcmp(n->children[0]->attrib.name, "[")){
+        genCode(n->children[0], toff, true);
+        addLine(ST, 3, toff, 1, "Push index");
+        addLine("TOFF dec: " + to_string(--toff));
+        genCode(n->children[1], toff, true);
+        addLine("TOFF inc: " + to_string(++toff));
+        addLine(LD, 4, toff, 1, "Pop index");
+        ASTreeNode* id = n->children[0]->children[0];
+        if(id->varkind == Parameter){
+            addLine(LD, 5, id->loc, id->varkind == Local || id->varkind == Parameter, "(LOCAL) Load address of base of array " + string(id->attrib.name));
+        }else{
+            addLine(LDA, 5, id->loc, id->varkind == Local || id->varkind == Parameter, "Load address of base of array " + string(id->attrib.name));
+        }
+        addLine(SUB_tm, 5,5,4, "Compute offset of value");
+        addLine(LD, 4,0,5, "Load lhs variable " + string(id->attrib.name));
+        if(op == "+="){
+            addLine(ADD_tm, 3,4,3, comment);
+        }else if(op == "-="){
+            addLine(SUB_tm, 3,4,3, comment);
+        }else if(op == "*="){
+            addLine(MUL, 3,4,3, comment);
+        }else if(op == "/="){
+            addLine(DIV_tm, 3,4,3, comment);
+        }
+        addLine(ST, 3, 0, 5, "Store variable " + string(id->attrib.name));
+    }else{
+        genCode(n->children[1], toff-1, true);
+        addLine(LD, 4, n->children[0]->loc, n->children[0]->varkind != Global, "Load lhs variable " + string(n->children[0]->attrib.name));
+        if(op == "+="){
+            addLine(ADD_tm, 3,4,3, comment);
+        }else if(op == "-="){
+            addLine(SUB_tm, 3,4,3, comment);
+        }else if(op == "*="){
+            addLine(MUL, 3,4,3, comment);
+        }else if(op == "/="){
+            addLine(DIV_tm, 3,4,3, comment);
+        }
+        addLine(ST, 3, n->children[0]->loc, 0, "Store variable " + string(n->children[0]->attrib.name));
     }
 }
 
@@ -697,5 +793,4 @@ void CodeGenerator::loadConst(ASTreeNode* n){
             break;
         // TODO: add STRINGCONST
     }
-
 }

@@ -4,8 +4,12 @@
 #include <iostream>
 #include <fstream>
 #include <string>
+#include "symbolTable.h"
 #include "emitcode.cpp"
 #include "offsetstack.cpp"
+
+extern SymbolTable decls;
+using namespace std;
 
 FILE* code; // pointer to testfile.tm, needed by emitcode
 
@@ -63,6 +67,8 @@ class CodeGenerator {
         int main_loc;               // stores the address in program memory for main
         int main_ret_loc;           // store the pmem address of the main return stmt, used in init
         int goffset;
+        int goffFinal;
+        SymbolTable declarations;
 
         OffsetStack toff_stack;     // stores the current temporary offset at top of stack
 
@@ -91,12 +97,14 @@ class CodeGenerator {
         void genArgs(ASTreeNode*, int, int);
         void genId(ASTreeNode*);
         void genOpAssign(ASTreeNode*, std::string, int, std::string);
+        void genOpIncDec(ASTreeNode*, std::string);
 
         void generateInit();
         void loadConst(ASTreeNode*);
+        void initGlobals(string, void*m);
 
     public:
-        CodeGenerator(ASTreeNode*);     // Generate code based on the AST passed to the generator
+        CodeGenerator(ASTreeNode*, int, SymbolTable);     // Generate code based on the AST passed to the generator
         void writeToFile(std::ofstream&, std::string);  // appends a string to the output file
         void printCode();           // print each line of code
         // Test functions

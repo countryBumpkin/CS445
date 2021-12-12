@@ -91,6 +91,10 @@ int SemanticAnalyzer::getWarnings(){
     return numWarnings;
 }
 
+SymbolTable SemanticAnalyzer::getST(){
+    return st;
+}
+
 // pre-order traversal of the tree, handles all scope checking of this node
 void SemanticAnalyzer::preOrderTraversal(ASTreeNode* root)
 {

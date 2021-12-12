@@ -78,6 +78,7 @@ class SemanticAnalyzer {
 
         int getWarnings();
         int getErrors();
+        SymbolTable getST();
 };
 
 #endif

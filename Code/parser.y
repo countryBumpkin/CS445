@@ -145,6 +145,7 @@ scopedVarDec: STATIC type varDecList SEMICOLON  {
                                                     l->type = $2->type;
                                                     if(l->children[0] != NULL && l->children[0]->subkind.exp == InitK) l->children[0]->type = $2->type;
                                                     l->isStatic = true;
+                                                    l->varkind = LocalStatic;
                                                     l = l->sibling;
                                                   }
                                                   yyerrok;
@@ -637,7 +638,7 @@ void compileNoArgs(char* argv[]){
             printf("Number of warnings: %d\n", sa.getWarnings());
             printf("Number of errors: %d\n", sa.getErrors());
 
-            CodeGenerator cg(treeRec);
+            CodeGenerator(treeRec, goffset, sa.getST());
         }
     }
 }

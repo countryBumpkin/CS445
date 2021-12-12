@@ -1,5 +1,109 @@
-#include "codegen.h"
+#include <iostream>
+#include <fstream>
+#include <string>
+#include "symbolTable.h"
+#include "emitcode.cpp"
+#include "offsetstack.cpp"
+
+extern SymbolTable decls;
 using namespace std;
+
+FILE* code; // pointer to testfile.tm, needed by emitcode
+
+// Defines all TM instructions
+enum Instruction {
+                    NONE,                                   // Default, not a valid instruction
+                    LDC, LDA, LD, ST, JNZ, JZR, JMP,        // REGISTER TO MEMORY INSTRUCTIONS (RA)
+                    HALT, NOP, IN, INB, INC_tm, OUT, OUTB,     // REGISTER ONLY INSTRUCTIONS (RO)
+                    OUTC, OUTNL, ADD_tm, SUB_tm, MUL, DIV_tm,        // ...
+                    MOD_tm, AND_tm, OR_tm, XOR, NOT_tm, NEG, SWP, RND,  // ...
+                    TLT, TLE, TEQ, TNE, TGE, TGT, SLT, SGT, // TEST INSTRUCTIONS (RO)
+                    MOV, SET, CO, COA,                      // BLOCK MEMORY TO MEMORY INSTRUCTIONS (RO)
+                    LIT,                                    // LITERAL INSTRUCTIONS
+                };
+
+enum LType {DEFAULT, STR_LIT, NUM_LIT, BOOL_LIT}; // denotes what type of literal this is
+
+
+/*
+    Describes all internal data associated with a single "instruction" or line of 3 address code and provides
+    any necessary helper functions.
+*/
+class TMInstruction {
+    private:
+        Instruction instruction = NONE;    // the instruction to be executed
+        int addrs[3];               // 3 address part of "3 Address Code"
+        std::string comment;        // stores a comment for this line
+        LType ltype = DEFAULT;      // if this is not default, it stores the type of literal
+        union literal {
+            std::string* str_lit;// if this is one of the LIT commands, put a string lit here
+            int* int_lit;        // also for a LIT command, but for int
+            bool* bool_lit;      // for LIT command
+        } literal;
+
+    public:
+        int address;                // program memory address
+        std::string instructionToStr(); // convert an instruction code into a string output
+        TMInstruction(int line, Instruction ins, int addr1, int addr2, int addr3, std::string comment);
+        TMInstruction(int line, Instruction ins, LType ltype, void* lit_ptr, std::string comment);
+        TMInstruction(std::string);
+        TMInstruction();
+        std::string to_string();    // converts this TM instruction into a single 3 address code to go in output
+
+        TMInstruction* head; // TMInstruction above this in the doubly linked list, NULL if true head of list
+        TMInstruction* tail; // TMInstruction below, NULL if true tail of list
+};
+
+std::ofstream* tm_output;   // reference to 3 address output file
+int pmem;                   // store the address of the next instruction here
+int main_loc;               // stores the address in program memory for main
+int main_ret_loc;           // store the pmem address of the main return stmt, used in init
+int goffset;
+int goffFinal;
+int breakpoint;
+SymbolTable declarations;
+
+OffsetStack toff_stack;     // stores the current temporary offset at top of stack
+
+// imperfect solution, can't handle multiple definitions of single function name
+std::map<std::string, TMInstruction*> functionMap; // function names mapping to instructions
+
+bool isCallChild = false;   // if set true, then nodes below call are params
+bool inExpression = false;
+// Setup functions
+void init();                // sets up all static header comments and cookie-cutter code before tree traversal
+// Doubly linked list functions
+TMInstruction* prog_head;        // reference to the head/first line of 3 address code
+TMInstruction* prog_tail;        // reference to the tail/last line of 3 address code
+void addLine(TMInstruction*);    // add new line to end of program
+// wrappers for addLine that create a new TMInstruction and add it to the list
+TMInstruction* addLine(std::string);
+TMInstruction* addLine(Instruction, int, int, int, std::string);
+TMInstruction* addLine(Instruction, LType, void*, std::string);
+void insertLine(TMInstruction*, TMInstruction*); // insert new line after a specific line
+TMInstruction* removeLine(TMInstruction*); // remove a line from the list while keeping lines before and after
+void appendToFile(); // write all lines of code to the output file in order
+
+// code generation functions
+void genCode(ASTreeNode* n, int offset, bool genSibling);
+void genReturn(ASTreeNode*);
+void genArgs(ASTreeNode*, int, int);
+void genId(ASTreeNode*);
+void genOpAssign(ASTreeNode*, std::string, int, std::string);
+void genOpIncDec(ASTreeNode*, std::string);
+
+void generateInit();
+void loadConst(ASTreeNode*);
+void initGlobals(string, void*m);
+void backpatchJMPHere(int, string comment);
+void backpatchJMPHere(Instruction, int, int, string);
+
+void CodeGenerator(ASTreeNode*, int, SymbolTable);     // Generate code based on the AST passed to the generator
+void writeToFile(std::ofstream&, std::string);  // appends a string to the output file
+void printCode();           // print each line of code
+// Test functions
+void testCGEN_INSERT();
+void testCGEN_REMOVE();
 
 ////////////////////////////////////////////////////////////////////////////////
 //  TMInstruction                                                             //
@@ -109,12 +213,12 @@ std::string TMInstruction::to_string(){
     }
 }
 
-void CodeGenerator::printCode(){
+void printCode(){
     std::cout   << "--------------------------------------------------------------\n"
                 << "                          PROGRAM\n"
                 << "--------------------------------------------------------------\n";
 
-    TMInstruction* tmp = this->prog_head;
+    TMInstruction* tmp = prog_head;
     while(tmp != NULL){
         std::cout << tmp->to_string() << std::endl;
         tmp = tmp->tail;
@@ -139,7 +243,7 @@ std::string TMInstruction::instructionToStr(){
         case JNZ:
             return "JNZ";
         case JZR:
-            return "JNZ";
+            return "JZR";
         case JMP:           // REGISTER TO MEMORY INSTRUCTIONS (RA)
             return "JMP";
         case HALT:
@@ -214,62 +318,6 @@ std::string TMInstruction::instructionToStr(){
     return "ERROR: not an instruction";
 }
 
-/* TEST FUNCTIONS FOR TMINSTRUCTION and CODEGENERATOR LINKED LIST*/
-void CodeGenerator::testCGEN_REMOVE(){
-	std::cout << "------------------------------------------------------------\n"
-			  << "TEST: removeLine()\n"
-			  << "------------------------------------------------------------\n";
-
-	CodeGenerator* cg = new CodeGenerator(NULL);
-	TMInstruction* a = new TMInstruction(0, LDA, 0, 0, 0, "dummy line");
-	TMInstruction* b = new TMInstruction();
-	TMInstruction* c = new TMInstruction();
-
-	cg->addLine(a);
-	cg->addLine(b);
-	cg->addLine(c);
-
-	cg->printCode();
-
-	cg->removeLine(a);
-	cg->removeLine(b);
-
-	cg->printCode();
-	cg->removeLine(c);
-	cg->printCode();
-
-	std::cout << "-------------------------------------------------------------\n"
-			  << "END TEST\n"
-			  << "*\n*\n*\n";
-}
-
-void CodeGenerator::testCGEN_INSERT(){
-	std::cout << "------------------------------------------------------------\n"
-			  << "TEST: insertLine()\n"
-			  << "-------------------------------------------------------------\n";
-
-	CodeGenerator* cg = new CodeGenerator(NULL);
-	TMInstruction* a = new TMInstruction(0, LDA, 0, 0, 0, "dummy line");
-	std::string str("\"str literal\"");
-	TMInstruction* b = new TMInstruction(2, LIT, STR_LIT, &str, "LIT instruction");
-	TMInstruction* c = new TMInstruction(1, CO, 1, 3, 4, "CO instruction");
-	TMInstruction* d = new TMInstruction(3, CO, 1, 3, 4, "CO instruction");
-
-	cg->addLine(a);
-	cg->addLine(b);
-	cg->insertLine(c, a); // insert c after a
-
-	cg->printCode();
-
-	cg->insertLine(d, b);
-
-	cg->printCode();
-
-	std::cout << "-------------------------------------------------------------\n"
-			  << "END TEST\n"
-			  << "*\n*\n*\n";
-}
-
 ////////////////////////////////////////////////////////////////////////////////
 //  CODEGENERATOR                                                             //
 ////////////////////////////////////////////////////////////////////////////////
@@ -277,15 +325,17 @@ void CodeGenerator::testCGEN_INSERT(){
  *  Constructs a CodeGenerator objectcase parses the output file namecase and creates a new
  *  *.tm file for the 3 address code to be output to
 */
-CodeGenerator::CodeGenerator(ASTreeNode* root){
+void CodeGenerator(ASTreeNode* root, int gFinal, SymbolTable st){
     // set defaults for doubly linked list
-    this->prog_head = NULL;
-    this->prog_tail = NULL;
+    prog_head = NULL;
+    prog_tail = NULL;
     // create output testfile.tm file
     init();
     // attach pointer to code so we can use emitcode.h
     code = fopen("testfile.tm", "a");
     goffset = 1;
+    goffFinal = gFinal;
+    declarations = st;
     genCode(root, 0, true);
     generateInit();
     appendToFile();
@@ -295,9 +345,9 @@ CodeGenerator::CodeGenerator(ASTreeNode* root){
  *  Creates and opens a new output file and writes the header comments and C- I/O libraries into it. Also performs any
  *  useful setup of static code that can be done prior to tree traversal.
  */
-void CodeGenerator::init(){
+void init(){
     std::ofstream tm("testfile.tm");
-    this->tm_output = &tm;
+    tm_output = &tm;
 
     addLine("*************************************");
     addLine("C- Compiler version 1.0");
@@ -376,7 +426,7 @@ void CodeGenerator::init(){
 /*
  *  Insert code to jump to load return, jump to main, and call halt
  */
-void CodeGenerator::generateInit(){
+void generateInit(){
     int tmp = pmem;
     pmem = 0;
     addLine(JMP, 7, main_ret_loc, 7, "JMP to init");
@@ -384,11 +434,12 @@ void CodeGenerator::generateInit(){
     // INIT
     addLine("INIT");
     // set frame at end of globals
-    addLine(LDA, 1, --goffset, 0, "set first frame at end of globals");
+    addLine(LDA, 1, goffFinal, 0, "set first frame at end of globals");
     addLine(ST, 1, 0, 1, "store old ");
 
     addLine("INIT GLOBALS AND STATICS");
     // TODO: init globals and statics
+    declarations.applyToAllGlobal(initGlobals);
     addLine("END INIT GLOBALS AND STATICS");
 
     addLine(LDA, 3, 1, 7, "return address in ac");
@@ -397,12 +448,27 @@ void CodeGenerator::generateInit(){
     addLine(HALT, 0, 0, 0, "END EXECUTION");
     addLine("END INIT");
 }
+/*
+ * Initialize all global variables
+ */
+void initGlobals(string, void* m){
+    ASTreeNode* n = (ASTreeNode*)m; // type cast
+    if(n->subkind.decl == VarK &&  n->children[0] != NULL){
+        genCode(n->children[0], -2, true);
+        addLine(ST, 3, n->loc, 0, "initialize " + string(n->attrib.name));
+    }
+    if(n->subkind.decl == VarK && n->isArray){
+        addLine(LDC, 3, n->size-1, 0, "load size of array " + string(n->attrib.name));
+        addLine(ST, 3, n->loc + 1, 0, "store size of array " + string(n->attrib.name));
+    }
+}
+
 
 /*
  *  Writes a single line to a file, file returns to state it was in before
  *  writing so if it was closed it will be closed after appending
  */
-void CodeGenerator::writeToFile(std::ofstream& file, std::string line){
+void writeToFile(std::ofstream& file, std::string line){
     bool was_open = true;
     if(!file.is_open()) {file.open("testfile.tm", std::ofstream::app); was_open = false;}
     file << line << std::endl;
@@ -412,9 +478,9 @@ void CodeGenerator::writeToFile(std::ofstream& file, std::string line){
 /*
  *  Write all lines of code in LL to the output file in order of program memory address
  */
-void CodeGenerator::appendToFile(){
+void appendToFile(){
     std::ofstream file("testfile.tm", std::ofstream::app);
-    TMInstruction* tmp = this->prog_head;
+    TMInstruction* tmp = prog_head;
     while(tmp != NULL){
         writeToFile(file, tmp->to_string());
         tmp = tmp->tail;
@@ -426,28 +492,28 @@ void CodeGenerator::appendToFile(){
 /*
  *  Add a line to the end of the doubly linked list
  */
-void CodeGenerator::addLine(TMInstruction* tm_ins){
-    if(this->prog_head == NULL) this->prog_head = this->prog_tail = tm_ins;
+void addLine(TMInstruction* tm_ins){
+    if(prog_head == NULL) prog_head = prog_tail = tm_ins;
     else{
-        this->prog_tail->tail = tm_ins; // previous tail stores ref to this node as its tail
-        tm_ins->head = this->prog_tail; // store ref to previous tail as above this line
-        this->prog_tail = tm_ins;      // new ref to end of list points to this line
+        prog_tail->tail = tm_ins; // previous tail stores ref to this node as its tail
+        tm_ins->head = prog_tail; // store ref to previous tail as above this line
+        prog_tail = tm_ins;      // new ref to end of list points to this line
     }
 }
 
-TMInstruction* CodeGenerator::addLine(std::string comment){
+TMInstruction* addLine(std::string comment){
     TMInstruction* ins = new TMInstruction(comment);
     addLine(ins);
     return ins;
 }
 
-TMInstruction* CodeGenerator::addLine(Instruction ins, int addr, int addr1, int addr2, std::string comment){
+TMInstruction* addLine(Instruction ins, int addr, int addr1, int addr2, std::string comment){
     TMInstruction* instruct = new TMInstruction(pmem++, ins, addr, addr1, addr2, comment);
     addLine(instruct);
     return instruct;
 }
 
-TMInstruction* CodeGenerator::addLine(Instruction ins, LType ltype, void* cVal, std::string comment){
+TMInstruction* addLine(Instruction ins, LType ltype, void* cVal, std::string comment){
     TMInstruction* instruct = new TMInstruction(pmem++, ins, ltype, cVal, comment);
     addLine(instruct);
     return instruct;
@@ -456,9 +522,9 @@ TMInstruction* CodeGenerator::addLine(Instruction ins, LType ltype, void* cVal, 
 /*
  *  Insert a new line after some other specified node
  */
-void CodeGenerator::insertLine(TMInstruction* new_line, TMInstruction* target_line){
+void insertLine(TMInstruction* new_line, TMInstruction* target_line){
     if(target_line == NULL) {printf("ERROR: NULL ptr passed to insertLine()\n"); return;}
-    else if(target_line == this->prog_head){
+    else if(target_line == prog_head){
 
     }
     // init values for inserted line
@@ -484,20 +550,20 @@ void CodeGenerator::insertLine(TMInstruction* new_line, TMInstruction* target_li
  *  Removes a line from anywhere in the list and returns the pointer to it with all its references broken
  *  Also rearanges the pointers in the list to maintain valid structure
  */
-TMInstruction* CodeGenerator::removeLine(TMInstruction* target){
+TMInstruction* removeLine(TMInstruction* target){
     if(target == NULL){printf("ERROR: NULL ptr passed to removeLine()\n"); return NULL;}
 
-    if(target != this->prog_head && target != this->prog_tail){
+    if(target != prog_head && target != prog_tail){
         target->head->tail = target->tail;
     }else{
-        if(this->prog_head == target){
-            this->prog_head = target->tail;
+        if(prog_head == target){
+            prog_head = target->tail;
             // this->prog_head->head = NULL;
         }
 
-        if(this->prog_tail == target){
-            this->prog_tail = target->head;
-            this->prog_tail->tail = NULL;
+        if(prog_tail == target){
+            prog_tail = target->head;
+            prog_tail->tail = NULL;
         }
     }
 
@@ -507,10 +573,11 @@ TMInstruction* CodeGenerator::removeLine(TMInstruction* target){
     return target;
 }
 
-void CodeGenerator::genCode(ASTreeNode* n, int offset, bool genSibling){
+void genCode(ASTreeNode* n, int offset, bool genSibling){
     if(n == NULL) return; // protect against disaster
     cout << "gen code for " << n->attrib.name << endl;
     int reset_pt;
+    int reset_pt2;
     switch(n->nodekind){
         case DeclK:
             switch(n->subkind.decl){
@@ -529,7 +596,9 @@ void CodeGenerator::genCode(ASTreeNode* n, int offset, bool genSibling){
                 case ParamK:
                     break;
                 case VarK:
-                    if(n->varkind == Global){
+                    cout << "decl var " << n->attrib.name << endl;
+                    if(n->varkind == Global || n->varkind == LocalStatic){
+                        cout << "setting global offset" << endl;
                         goffset = n->loc;
                     }
                     break;
@@ -537,13 +606,33 @@ void CodeGenerator::genCode(ASTreeNode* n, int offset, bool genSibling){
             break;
         case StmtK:
             switch(n->subkind.stmt){
+                case IfK:
+                    addLine("IF");
+                    genCode(n->children[0], offset, true);
+                    reset_pt = pmem;
+                    pmem++;
+                    addLine("THEN");
+                    genCode(n->children[1], offset, true);
+                    if(n->children[2] != NULL){
+                        reset_pt2 = pmem;
+                        pmem++;
+                    }
+                    backpatchJMPHere(JZR, 3, reset_pt, "jump on conditional failure [backpatched]");
+                    if(n->children[2] != NULL){
+                        addLine("ELSE");
+                        genCode(n->children[2], offset, true);
+                        backpatchJMPHere(reset_pt2, "skip else [backpatched]");
+                    }
+                    addLine("ENDIF");
+                    break;
                 case CompoundK:
                     reset_pt = offset; // store toff for when we leave it again
                     offset = n->size;
                     addLine("COMPOUND");
                     addLine("TOFF set: " + to_string(offset));
                     addLine("Compound Body");
-                    genCode(n->children[1], offset, true);
+                    genCode(n->children[0], offset, true); // gen for local decs
+                    genCode(n->children[1], offset, true); // gen for stmt list
                     offset = reset_pt;
                     addLine("TOFF set: " + to_string(offset));
                     addLine("END COMPOUND");
@@ -557,6 +646,9 @@ void CodeGenerator::genCode(ASTreeNode* n, int offset, bool genSibling){
                     addLine(JMP, 7, 0, 3, "Return");
                     addLine("END RETURN");
                     genSibling = false;
+                    break;
+                case BreakK:
+                    addLine(LDC, 7, breakpoint, 0, "break");
                     break;
             }
             break;
@@ -642,9 +734,12 @@ void CodeGenerator::genCode(ASTreeNode* n, int offset, bool genSibling){
                     }else if(op == "/="){
                         genOpAssign(n, op, offset, "Op /=");
                         break;
+                    }else if(op == "++" || op == "--"){
+                        genOpIncDec(n, op);
+                        break;
                     }
 
-                    addLine("EXPRESSION");
+                    addLine("Assign EXPRESSION " + op + " " + to_string(n->linenum));
                     // provide for array element assignment
                     if(!strcmp(n->children[0]->attrib.name, "[")){
                         genCode(n->children[0]->children[1], offset-1, true);
@@ -681,7 +776,7 @@ void CodeGenerator::genCode(ASTreeNode* n, int offset, bool genSibling){
     if(genSibling){genCode(n->sibling, offset, true);}
 }
 
-void CodeGenerator::genReturn(ASTreeNode* n){
+void genReturn(ASTreeNode* n){
     addLine(LD, 3, -1, 1, "Adjust fp");
     addLine(LD, 1, 0, 1, "Return");
     if(strcmp(n->attrib.name, "main") == 0 && n->num_params == 0) main_ret_loc = pmem;
@@ -694,7 +789,7 @@ void CodeGenerator::genReturn(ASTreeNode* n){
 /*
  * Generate the instructions for loading args to function calls
  */
-void CodeGenerator::genArgs(ASTreeNode* n, int toff, int arg_num){
+void genArgs(ASTreeNode* n, int toff, int arg_num){
     addLine("TOFF dec: " + to_string(toff));
     if(n == NULL) return;
     addLine("Param " + to_string(arg_num + 1));
@@ -708,7 +803,7 @@ void CodeGenerator::genArgs(ASTreeNode* n, int toff, int arg_num){
 /*
  *  Generate code for IdK expressions
  */
-void CodeGenerator::genId(ASTreeNode* n){
+void genId(ASTreeNode* n){
     if(n->varkind == Global){   // Global
         if(n->isArray){
             addLine(LDA, 3, n->loc, 0, "(GLOBAL)Load address of base of array " + string(n->attrib.name));
@@ -734,10 +829,10 @@ void CodeGenerator::genId(ASTreeNode* n){
 /*
  *  Generate code for assignment operations ADDASS, SUBASS, MULASS, DIVASS.
  */
-void CodeGenerator::genOpAssign(ASTreeNode* n, string op, int toff, string comment){
-    addLine("EXPRESSION");
+void genOpAssign(ASTreeNode* n, string op, int toff, string comment){
+    addLine("Assign Op EXPRESSION " + op + " " + to_string(n->linenum));
     if(!strcmp(n->children[0]->attrib.name, "[")){
-        genCode(n->children[0], toff, true);
+        genCode(n->children[0]->children[1], toff-1, true);
         addLine(ST, 3, toff, 1, "Push index");
         addLine("TOFF dec: " + to_string(--toff));
         genCode(n->children[1], toff, true);
@@ -778,9 +873,35 @@ void CodeGenerator::genOpAssign(ASTreeNode* n, string op, int toff, string comme
 }
 
 /*
+ *  Generate the code for increment and decrement instructions
+ */
+void genOpIncDec(ASTreeNode* n, string op){
+    if(!strcmp(n->children[0]->attrib.name, "[")){ // is array
+        addLine(LDC, 3,3,6, "Load integer constant");
+        ASTreeNode* id = n->children[0]->children[0];
+        if(id->varkind == Parameter){
+            addLine(LD, 5, id->loc, id->varkind == Local || id->varkind == Parameter, "Load address of base of array " + string(id->attrib.name));
+        }else{
+            addLine(LDA, 5, id->loc, id->varkind == Local || id->varkind == Parameter, "Load address of base of array " + string(id->attrib.name));
+        }
+        addLine(SUB_tm, 5,5,3, "Compute offset of value");
+        addLine(LD, 3,0,5, "load the lhs variable " + string(id->attrib.name));
+        if(op == "++") addLine(LDA, 3, 1,3, "increment value of " + string(id->attrib.name));
+        else addLine(LDA, 3, -1,3, "decrement value of " + string(id->attrib.name));
+        addLine(ST, 3, 0, 5, "store variable " + string(id->attrib.name));
+    }else{
+        ASTreeNode* id = n->children[0];
+        addLine(LD, 3, id->loc, id->varkind == Local || id->varkind == Parameter, "retreive old value of " + string(id->attrib.name));
+        if(op == "++") addLine(LDA, 3, 1,3, "increment value of " + string(id->attrib.name));
+        else addLine(LDA, 3, -1,3, "decrement value of " + string(id->attrib.name));
+        addLine(ST, 3, id->loc, id->varkind != Global, "Store variable " + string(id->attrib.name));
+    }
+}
+
+/*
  *  Helper function for loading a constant into memory
  */
-void CodeGenerator::loadConst(ASTreeNode* n){
+void loadConst(ASTreeNode* n){
     switch(n->type){
         case Integer:
             addLine(LDC, 3,atoi(n->attrib.name), 6, "Load integer constant");
@@ -793,4 +914,19 @@ void CodeGenerator::loadConst(ASTreeNode* n){
             break;
         // TODO: add STRINGCONST
     }
+}
+
+void backpatchJMPHere(int addr, string comment){
+    int store = pmem;
+    pmem = addr;
+    // LDA here
+    addLine(JMP, 7, store - addr - 1, 7, comment);
+    pmem = store;
+}
+void backpatchJMPHere(Instruction ins, int reg, int addr, string comment){
+    int store = pmem;
+    pmem = addr;
+    // JMP here
+    addLine(ins, reg, store - addr - 1, 7, comment);
+    pmem = store;
 }

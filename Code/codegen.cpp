@@ -1,9 +1,8 @@
 #include <iostream>
 #include <fstream>
-#include <string>
 #include "symbolTable.h"
-#include "emitcode.cpp"
-#include "offsetstack.cpp"
+#include <string>
+#include "emitcode.h"
 
 extern SymbolTable decls;
 using namespace std;
@@ -62,8 +61,6 @@ int goffset;
 int goffFinal;
 int breakpoint;
 SymbolTable declarations;
-
-OffsetStack toff_stack;     // stores the current temporary offset at top of stack
 
 // imperfect solution, can't handle multiple definitions of single function name
 std::map<std::string, TMInstruction*> functionMap; // function names mapping to instructions
@@ -438,7 +435,7 @@ void generateInit(){
     addLine(ST, 1, 0, 1, "store old ");
 
     addLine("INIT GLOBALS AND STATICS");
-    // TODO: init globals and statics
+    // init globals and statics
     declarations.applyToAllGlobal(initGlobals);
     addLine("END INIT GLOBALS AND STATICS");
 
@@ -575,9 +572,8 @@ TMInstruction* removeLine(TMInstruction* target){
 
 void genCode(ASTreeNode* n, int offset, bool genSibling){
     if(n == NULL) return; // protect against disaster
-    cout << "gen code for " << n->attrib.name << endl;
-    int reset_pt;
-    int reset_pt2;
+    //cout << "gen code for " << n->attrib.name << endl;
+    int reset_pt, reset_pt2, breakBack;
     switch(n->nodekind){
         case DeclK:
             switch(n->subkind.decl){
@@ -596,9 +592,24 @@ void genCode(ASTreeNode* n, int offset, bool genSibling){
                 case ParamK:
                     break;
                 case VarK:
-                    cout << "decl var " << n->attrib.name << endl;
+                    //cout << "decl var " << n->attrib.name << endl;
+                    //cout << (n->varkind == LocalStatic) << endl;
+                    if(n->varkind != Global && n->varkind != LocalStatic && n->hasInit){
+                        addLine("TOFF dec: " + to_string(--offset));
+                        if(n->children[0] != NULL && !(n->children[0]->type == Char && n->children[0]->size > 1)){ // if not STRINGCONST
+                            genCode(n->children[0], offset, true);
+                            addLine(ST, 3, n->loc, 1, "Store variable " + string(n->attrib.name));
+                        }
+                        if(n->isArray){
+                            addLine(LDC, 3, n->size-1, 6, "load size of array " + string(n->attrib.name));
+                            addLine(ST, 3, n->loc+1, 1, "store size of array " + string(n->attrib.name));
+                        }
+                        if(n->children[0] != NULL && n->children[0]->type == Char && n->children[0]->size > 1){ // if STRINGCONST
+                            genCode(n->children[0], offset, true);
+                        }
+                    }
                     if(n->varkind == Global || n->varkind == LocalStatic){
-                        cout << "setting global offset" << endl;
+                        //cout << "setting global offset" << endl;
                         goffset = n->loc;
                     }
                     break;
@@ -625,6 +636,63 @@ void genCode(ASTreeNode* n, int offset, bool genSibling){
                     }
                     addLine("ENDIF");
                     break;
+                case WhileK:
+                    {
+                        breakBack = breakpoint;
+                        addLine("WHILE");
+                        int primary_exp = pmem; // save beginning of the primary expression for evaluation
+                        genCode(n->children[0], offset, true); // eval primary expression
+                        int goto_do = pmem;         // DO JMP: go here to JMP to the do portion
+                        pmem += 2;                  // open instruction slots for DO JMP and BREAK JMP
+                        breakpoint = goto_do + 1;   // BREAK JMP: go here to jump out of the loop
+                        backpatchJMPHere(JNZ, 3, goto_do, "skip jump to end of while on success [backpatched]");
+                        addLine("DO");
+                        genCode(n->children[1], offset, true); // gen do stmts
+                        addLine(LDC, 7, primary_exp, 0, "go to beginning of while");
+                        backpatchJMPHere(breakpoint, "jump to end of while [backpatched]");
+                        addLine("END WHILE");
+                        breakpoint = breakBack;
+                        break;
+                    }
+                case ForK:
+                    {
+                        addLine("TOFF set: " + to_string(offset));
+                        addLine("FOR");
+                        genCode(n->children[0], offset, true); // var
+                        genCode(n->children[1], offset, true); // RangeK
+                        int primary_exp = pmem;
+                        // adjust size of compound to consider For stmt
+                        if(n->children[2]->nodekind == StmtK && n->children[2]->subkind.stmt == CompoundK) n->children[2]->size -= 2;
+                        genCode(n->children[2], offset, true); // COMPOUND or stmt
+                        addLine(LD, 3, offset, 1, "Load index");
+                        addLine(LD, 5, offset - 2, 1, "Load step");
+                        addLine(ADD_tm, 3, 3, 5, "increment");
+                        addLine(ST, 3, offset, 1, "store back to index");
+                        addLine(JMP, 7, primary_exp - (pmem + 7), 7, "go to beginning of loop");
+                        backpatchJMPHere(primary_exp - 1, "Jump past loop [backpatch]");
+                        break;
+                    }
+                case RangeK:
+                    {
+                        addLine("RANGE");
+                        genCode(n->children[0], offset - 3, true);
+                        addLine(ST, 3, offset, 1, "save starting value in index var");
+                        genCode(n->children[1], offset - 3, true);
+                        addLine(ST, 3, offset-1, 1, "save stop value");
+                        if(n->children[2] != NULL){
+                            genCode(n->children[2], offset-3, true);
+                        }else{
+                            addLine(LDC, 3, 1, 6, "default increment by 1");
+                        }
+                        addLine(ST, 3, offset-2, 1, "save step value");
+                        addLine(LD, 4, offset, 1, "loop index");
+                        addLine(LD, 5, offset-1, 1, "stop value");
+                        addLine(LD, 3, offset-2, 1, "step value");
+                        addLine(SLT, 3,4,5, "Op <");
+                        addLine(JNZ, 3,1,7, "Jump to loop body");
+                        pmem++;
+                        break;
+                    }
                 case CompoundK:
                     reset_pt = offset; // store toff for when we leave it again
                     offset = n->size;
@@ -648,7 +716,7 @@ void genCode(ASTreeNode* n, int offset, bool genSibling){
                     genSibling = false;
                     break;
                 case BreakK:
-                    addLine(LDC, 7, breakpoint, 0, "break");
+                    addLine(JMP, 7, breakpoint-pmem-1, 7, "break"); // this doesn't match code... might have some bugs
                     break;
             }
             break;
@@ -657,12 +725,15 @@ void genCode(ASTreeNode* n, int offset, bool genSibling){
                 case OpK:
                     {
                         string op = string(n->attrib.name);
-                        cout << "gen lhs" << endl;
+                        //cout << "gen lhs" << endl;
                         genCode(n->children[0], offset, true);
                         // UNARY OPs
                         if(op == "chsign") addLine(NEG, 3, 3, 3, "Op unary -");
-                        else if(op == "sizeof") addLine("sizeof here");
-                        else if(op == "?") addLine(RND, 3, 3, 6, "Op ?");
+                        else if(op == "sizeof"){
+                            //genCode(n->children[0], offset, true);
+                            addLine(LD, 3, 1, 3, "Load array size");
+                            break;
+                        }else if(op == "?") addLine(RND, 3, 3, 6, "Op ?");
                         else if(op == "not"){
                             addLine(LDC, 4, 1, 6, "Load 1");
                             addLine(XOR, 3, 3, 4, "Op XOR to get logical not");
@@ -670,7 +741,7 @@ void genCode(ASTreeNode* n, int offset, bool genSibling){
                             // gen binary
                             addLine(ST, 3, offset, 1, "Push left side"); // store lhs
                             addLine("TOFF dec: " + to_string(--offset));
-                            cout << "gen rhs" << endl;
+                            //cout << "gen rhs" << endl;
                             genCode(n->children[1], offset, true); // gen rhs
                             addLine("TOFF inc: " + to_string(++offset));
                             addLine(LD, 4, offset, 1, "Pop left into ac1");
@@ -721,54 +792,62 @@ void genCode(ASTreeNode* n, int offset, bool genSibling){
                     addLine("TOFF set: " + to_string(offset));
                     break;
                 case AssignK:
-                    string op = n->attrib.name;
-                    if(op == "+="){
-                        genOpAssign(n, op, offset, "Op +=");
-                        break;
-                    }else if(op == "-="){
-                        genOpAssign(n, op, offset, "Op -=");
-                        break;
-                    }else if(op == "*="){
-                        genOpAssign(n, op, offset, "Op *=");
-                        break;
-                    }else if(op == "/="){
-                        genOpAssign(n, op, offset, "Op /=");
-                        break;
-                    }else if(op == "++" || op == "--"){
-                        genOpIncDec(n, op);
-                        break;
-                    }
-
-                    addLine("Assign EXPRESSION " + op + " " + to_string(n->linenum));
-                    // provide for array element assignment
-                    if(!strcmp(n->children[0]->attrib.name, "[")){
-                        genCode(n->children[0]->children[1], offset-1, true);
-                        addLine(ST, 3, offset, 1, "Push index");
-                        addLine("TOFF dec: " + to_string(--offset));
-                        genCode(n->children[1], offset, true);
-                        addLine("TOFF inc: " + to_string(++offset));
-                        addLine(LD, 4, offset, 1, "Pop index");
-                        ASTreeNode* id = n->children[0]->children[0];
-                        if(id->varkind == Parameter){
-                            addLine(LD, 5, id->loc, 1, "(EXP PARAM) Load address of base of array " + string(id->attrib.name));
-                        }else{
-                            addLine(LDA, 5, id->loc, 0, "(EXP NONPARAM) Load address of base of array " + string(id->attrib.name));
+                    {
+                        string op = n->attrib.name;
+                        if(op == "+="){
+                            genOpAssign(n, op, offset, "Op +=");
+                            break;
+                        }else if(op == "-="){
+                            genOpAssign(n, op, offset, "Op -=");
+                            break;
+                        }else if(op == "*="){
+                            genOpAssign(n, op, offset, "Op *=");
+                            break;
+                        }else if(op == "/="){
+                            genOpAssign(n, op, offset, "Op /=");
+                            break;
+                        }else if(op == "++" || op == "--"){
+                            genOpIncDec(n, op);
+                            break;
                         }
 
-                        addLine(SUB_tm, 5, 5, 4, "Compute offset of value");
-                        addLine(ST, 3, 0, 5, "Store variable " + string(id->attrib.name));
-                    }else if(n->children[0]->type == Char && n->children[0]->isArray){
-                        genCode(n->children[1], offset-1, true);
-                        addLine(LDA, 4, n->children[0]->loc, 1, "address of lhs");
-                        addLine(LD, 5, 1, 3, "size of rhs");
-                        addLine(LD, 6, 1, 4, "size of lhs");
-                        addLine(SWP, 5, 6, 6, "pick smallest size");
-                        addLine(MOV, 4, 3, 5, "array op =");
-                    }else{
-                        genCode(n->children[1], offset, true);
-                        addLine(ST, 3, n->children[0]->loc, n->children[0]->varkind == Local || n->children[0]->varkind == Parameter, "Store variable " + string(n->children[0]->attrib.name));
+                        addLine("Assign EXPRESSION " + op + " " + to_string(n->linenum));
+                        // provide for array element assignment
+                        if(!strcmp(n->children[0]->attrib.name, "[")){
+                            genCode(n->children[0]->children[1], offset-1, true);
+                            addLine(ST, 3, offset, 1, "Push index");
+                            addLine("TOFF dec: " + to_string(--offset));
+                            genCode(n->children[1], offset, true);
+                            addLine("TOFF inc: " + to_string(++offset));
+                            addLine(LD, 4, offset, 1, "Pop index");
+                            ASTreeNode* id = n->children[0]->children[0];
+                            if(id->varkind == Parameter){
+                                addLine(LD, 5, id->loc, 1, "(EXP PARAM) Load address of base of array " + string(id->attrib.name));
+                            }else{
+                                addLine(LDA, 5, id->loc, id->varkind == Local || id->varkind == Parameter, "(EXP NONPARAM) Load address of base of array " + string(id->attrib.name));
+                            }
+
+                            addLine(SUB_tm, 5, 5, 4, "Compute offset of value");
+                            addLine(ST, 3, 0, 5, "Store variable " + string(id->attrib.name));
+                        }else if(n->children[0]->type == Char && n->children[0]->isArray){
+                            genCode(n->children[1], offset-1, true);
+                            addLine(LDA, 4, n->children[0]->loc, 1, "address of lhs");
+                            addLine(LD, 5, 1, 3, "size of rhs");
+                            addLine(LD, 6, 1, 4, "size of lhs");
+                            addLine(SWP, 5, 6, 6, "pick smallest size");
+                            addLine(MOV, 4, 3, 5, "array op =");
+                        }else{
+                            genCode(n->children[1], offset, true);
+                            addLine(ST, 3, n->children[0]->loc, n->children[0]->varkind == Local || n->children[0]->varkind == Parameter, "Store variable " + string(n->children[0]->attrib.name));
+                            break;
+                        }
                     }
-                    break;
+                case InitK:
+                    {
+                        //cout << "gen InitK" << endl;
+                        addLine("InitK here");
+                        break;
+                    }
             }
             break;
     }

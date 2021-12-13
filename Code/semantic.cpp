@@ -360,7 +360,10 @@ bool SemanticAnalyzer::declareVar(ASTreeNode* n)
     std::string name = std::string(n->attrib.name);
     int line = n->linenum;
 
-    bool success = st.insert(name, n);
+    bool success;
+    if(n->isStatic) success = st.insertGlobal(name, n);
+    else success = st.insert(name, n);
+
     if(!success) // symbol already in most recent scope
     {
         ASTreeNode* tmp = (ASTreeNode*)(st.lookup(name));

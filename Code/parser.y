@@ -620,6 +620,9 @@ int numWarnings = 0;
 void compileNoArgs(char* argv[]){
     int fileIndex = 1;
     if ((yyin = fopen(argv[fileIndex], "r"))){
+        // GET FILE NAME
+        char* filename = strdup(argv[fileIndex]);
+        filename[strlen(filename) - 3] = '\0';
         // PARSE INPUT
         initErrorProcessing();  // init map for standardized error messages
         yyparse();              // parse file for semantic completeness
@@ -633,12 +636,11 @@ void compileNoArgs(char* argv[]){
             goffset = memController.traverseTree(treeRec); // fill tree with memory locations
         }
         // CODE GEN
+        printf("Number of warnings: %d\n", sa.getWarnings());
+        printf("Number of errors: %d\n", sa.getErrors());
         if(sa.getErrors() == 0){ // check redundant, here just to separate code
             // traverse AST tree in one(or more) passes and construct 3 address code for tm.c
-            printf("Number of warnings: %d\n", sa.getWarnings());
-            printf("Number of errors: %d\n", sa.getErrors());
-
-            CodeGenerator(treeRec, goffset, sa.getST());
+            CodeGenerator(filename, treeRec, goffset, sa.getST());
         }
     }
 }
